@@ -65,6 +65,7 @@
         .filter-btn.active { background: #1d9bf0; border-color: #1d9bf0; }
         .filter-btn.hot-filter.active { background: #f97316; border-color: #f97316; }
         .filter-btn.opp-filter.active { background: #eab308; border-color: #eab308; color: #000; }
+        .filter-btn.notes-filter.active { background: #a855f7; border-color: #a855f7; }
         
         .search {
             background: #16181c;
@@ -165,9 +166,39 @@
             border-radius: 8px;
             cursor: pointer;
             font-size: 12px;
-            margin-left: auto;
         }
         .export-btn:hover { background: #3a3f44; }
+        
+        .note-cell {
+            min-width: 200px;
+            max-width: 300px;
+        }
+        .note-input {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #e7e9ea;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 100%;
+            transition: all 0.2s;
+        }
+        .note-input:hover {
+            background: #1d1f23;
+            border-color: #2f3336;
+        }
+        .note-input:focus {
+            background: #1d1f23;
+            border-color: #1d9bf0;
+            outline: none;
+        }
+        .note-input::placeholder {
+            color: #71767b;
+            font-style: italic;
+        }
+        .note-input.has-note {
+            color: #a855f7;
+        }
     </style>
 </head>
 <body>
@@ -198,6 +229,7 @@
     <div class="filters">
         <button class="filter-btn active" data-filter="all" data-type="all">All</button>
         <button class="filter-btn hot-filter" data-filter="hot" data-type="hot">🔥 Hot</button>
+        <button class="filter-btn notes-filter" data-filter="has_notes" data-type="has_notes">📝 With Notes</button>
         <button class="filter-btn opp-filter" data-filter="open_opp" data-type="open_opp">💰 Open Opps</button>
         <span style="color:#2f3336; margin: 0 8px;">|</span>
         <button class="filter-btn" data-filter="P1" data-type="priority">🔴 P1</button>
@@ -207,7 +239,7 @@
         <button class="filter-btn" data-filter="expired" data-type="roe">ROE Expired</button>
         <button class="filter-btn" data-filter="expiring_soon" data-type="roe">ROE Expiring</button>
         <input type="text" class="search" placeholder="Search accounts..." id="searchInput">
-        <button class="export-btn" onclick="exportHotAccounts()">📤 Export Hot</button>
+        <button class="export-btn" onclick="exportData()">📤 Export</button>
     </div>
     
     <table>
@@ -219,7 +251,7 @@
                 <th data-sort="name">Account</th>
                 <th data-sort="status">ROE Status</th>
                 <th data-sort="days">Days</th>
-                <th data-sort="industry">Industry</th>
+                <th data-sort="notes">Notes</th>
             </tr>
         </thead>
         <tbody id="accountsTable"></tbody>
@@ -259,16 +291,48 @@
             document.getElementById('hotCount').textContent = count;
         }
         
-        function exportHotAccounts() {
+        // Notes - localStorage persistence
+        function getNotes() {
+            const stored = localStorage.getItem('accountNotes');
+            return stored ? JSON.parse(stored) : {};
+        }
+        
+        function setNote(accountId, note) {
+            const notes = getNotes();
+            if (note && note.trim()) {
+                notes[accountId] = note.trim();
+            } else {
+                delete notes[accountId];
+            }
+            localStorage.setItem('accountNotes', JSON.stringify(notes));
+        }
+        
+        function getNote(accountId) {
+            return getNotes()[accountId] || '';
+        }
+        
+        function handleNoteChange(accountId, inputEl) {
+            setNote(accountId, inputEl.value);
+            inputEl.classList.toggle('has-note', !!inputEl.value.trim());
+        }
+        
+        function exportData() {
             const hot = getHotAccounts();
-            const hotIds = Object.keys(hot);
-            const hotAccountsList = allAccounts
-                .filter(a => hot[a.salesforce_id])
-                .map(a => ({ name: a.name, id: a.salesforce_id, url: a.salesforce_url }));
+            const notes = getNotes();
             
-            const text = JSON.stringify(hotAccountsList, null, 2);
+            const exportList = allAccounts
+                .filter(a => hot[a.salesforce_id] || notes[a.salesforce_id])
+                .map(a => ({
+                    name: a.name,
+                    id: a.salesforce_id,
+                    url: a.salesforce_url,
+                    hot: !!hot[a.salesforce_id],
+                    note: notes[a.salesforce_id] || ''
+                }));
+            
+            const text = JSON.stringify(exportList, null, 2);
             navigator.clipboard.writeText(text).then(() => {
-                alert(`Copied ${hotAccountsList.length} hot accounts to clipboard!`);
+                alert(`Copied ${exportList.length} accounts (hot + notes) to clipboard!`);
             }).catch(() => {
                 prompt('Copy this:', text);
             });
@@ -297,12 +361,15 @@
         function filterAndSortAccounts() {
             const search = document.getElementById('searchInput').value.toLowerCase();
             const hotAccounts = getHotAccounts();
+            const notes = getNotes();
             let filtered = allAccounts;
             
             // Apply filter
             if (currentFilter !== 'all') {
                 if (currentFilterType === 'hot') {
                     filtered = filtered.filter(a => hotAccounts[a.salesforce_id]);
+                } else if (currentFilterType === 'has_notes') {
+                    filtered = filtered.filter(a => notes[a.salesforce_id]);
                 } else if (currentFilterType === 'open_opp') {
                     filtered = filtered.filter(a => a.has_open_opp);
                 } else if (currentFilterType === 'priority') {
@@ -317,7 +384,8 @@
                 filtered = filtered.filter(a => 
                     a.name.toLowerCase().includes(search) ||
                     (a.industry && a.industry.toLowerCase().includes(search)) ||
-                    (a.city && a.city.toLowerCase().includes(search))
+                    (a.city && a.city.toLowerCase().includes(search)) ||
+                    (notes[a.salesforce_id] && notes[a.salesforce_id].toLowerCase().includes(search))
                 );
             }
             
@@ -351,9 +419,9 @@
                         aVal = a.days_remaining === -999 ? 9999 : a.days_remaining;
                         bVal = b.days_remaining === -999 ? 9999 : b.days_remaining;
                         break;
-                    case 'industry':
-                        aVal = (a.industry || '').toLowerCase();
-                        bVal = (b.industry || '').toLowerCase();
+                    case 'notes':
+                        aVal = notes[a.salesforce_id] ? 0 : 1;
+                        bVal = notes[b.salesforce_id] ? 0 : 1;
                         break;
                     default:
                         aVal = 0; bVal = 0;
@@ -376,6 +444,7 @@
             }
             
             const hotAccounts = getHotAccounts();
+            const notes = getNotes();
             
             tbody.innerHTML = accounts.map(acc => {
                 const daysClass = acc.days_remaining < 0 ? 'days-negative' : 
@@ -388,6 +457,8 @@
                 const isHot = hotAccounts[acc.salesforce_id];
                 const hotClass = isHot ? 'is-hot' : '';
                 const oppIndicator = acc.has_open_opp ? '💰' : '<span class="opp-none">💰</span>';
+                const noteValue = notes[acc.salesforce_id] || '';
+                const noteClass = noteValue ? 'has-note' : '';
                 
                 return `
                     <tr>
@@ -400,10 +471,23 @@
                         </td>
                         <td><span class="status-badge status-${acc.roe_status}">${formatStatus(acc.roe_status)}</span></td>
                         <td class="days-remaining ${daysClass}">${daysText}</td>
-                        <td style="color:#71767b;font-size:13px">${acc.industry || '-'}</td>
+                        <td class="note-cell">
+                            <input type="text" 
+                                   class="note-input ${noteClass}" 
+                                   placeholder="Add note..." 
+                                   value="${escapeHtml(noteValue)}"
+                                   onchange="handleNoteChange('${acc.salesforce_id}', this)"
+                                   onblur="handleNoteChange('${acc.salesforce_id}', this)">
+                        </td>
                     </tr>
                 `;
             }).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/"/g, '&quot;');
         }
         
         function formatStatus(status) {
