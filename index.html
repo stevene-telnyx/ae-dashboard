@@ -199,6 +199,98 @@
         .note-input.has-note {
             color: #a855f7;
         }
+        
+        /* Note Modal */
+        .note-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .note-modal-overlay.active {
+            display: flex;
+        }
+        .note-modal {
+            background: #16181c;
+            border: 1px solid #2f3336;
+            border-radius: 16px;
+            padding: 24px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .note-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #2f3336;
+        }
+        .note-modal-title {
+            font-weight: 600;
+            font-size: 16px;
+            color: #e7e9ea;
+        }
+        .note-modal-close {
+            background: none;
+            border: none;
+            color: #71767b;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+        .note-modal-close:hover { color: #e7e9ea; }
+        .note-modal-textarea {
+            background: #1d1f23;
+            border: 1px solid #2f3336;
+            border-radius: 8px;
+            color: #e7e9ea;
+            font-size: 14px;
+            padding: 12px;
+            width: 100%;
+            min-height: 150px;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .note-modal-textarea:focus {
+            outline: none;
+            border-color: #1d9bf0;
+        }
+        .note-modal-textarea::placeholder {
+            color: #71767b;
+        }
+        .note-preview {
+            cursor: pointer;
+            max-width: 200px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #71767b;
+            transition: background 0.2s;
+        }
+        .note-preview:hover {
+            background: #1d1f23;
+        }
+        .note-preview.has-note {
+            color: #a855f7;
+        }
+        .note-preview-empty {
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -256,6 +348,17 @@
         </thead>
         <tbody id="accountsTable"></tbody>
     </table>
+
+    <!-- Note Modal -->
+    <div class="note-modal-overlay" id="noteModal" onclick="closeNoteModal(event)">
+        <div class="note-modal" onclick="event.stopPropagation()">
+            <div class="note-modal-header">
+                <span class="note-modal-title" id="noteModalTitle">Notes</span>
+                <button class="note-modal-close" onclick="closeNoteModal()">&times;</button>
+            </div>
+            <textarea class="note-modal-textarea" id="noteModalTextarea" placeholder="Add notes about this account..."></textarea>
+        </div>
+    </div>
 
     <script>
         let allAccounts = [];
@@ -340,16 +443,29 @@
         }
         
         let noteSyncTimeout = null;
-        function handleNoteChange(accountId, inputEl) {
-            const note = inputEl.value.trim();
-            
+        let currentNoteAccountId = null;
+        
+        function openNoteModal(accountId, accountName) {
+            currentNoteAccountId = accountId;
+            document.getElementById('noteModalTitle').textContent = accountName;
+            document.getElementById('noteModalTextarea').value = getNote(accountId);
+            document.getElementById('noteModal').classList.add('active');
+            document.getElementById('noteModalTextarea').focus();
+        }
+        
+        function closeNoteModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            document.getElementById('noteModal').classList.remove('active');
+            currentNoteAccountId = null;
+        }
+        
+        function handleNoteChange(accountId, note) {
             // Update locally
-            if (note) {
-                sharedNotes[accountId] = note;
+            if (note && note.trim()) {
+                sharedNotes[accountId] = note.trim();
             } else {
                 delete sharedNotes[accountId];
             }
-            inputEl.classList.toggle('has-note', !!note);
             
             // Debounce sync (wait 500ms after typing stops)
             clearTimeout(noteSyncTimeout);
@@ -360,11 +476,28 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(sharedNotes),
                     });
+                    // Re-render to update the preview
+                    renderTable(filterAndSortAccounts());
                 } catch (e) {
                     console.error('Failed to sync notes:', e);
                 }
             }, 500);
         }
+        
+        // Listen for textarea changes in modal
+        document.addEventListener('DOMContentLoaded', () => {
+            const textarea = document.getElementById('noteModalTextarea');
+            textarea.addEventListener('input', () => {
+                if (currentNoteAccountId) {
+                    handleNoteChange(currentNoteAccountId, textarea.value);
+                }
+            });
+        });
+        
+        // Close modal on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeNoteModal();
+        });
         
         function exportData() {
             const hot = getHotAccounts();
@@ -523,12 +656,9 @@
                         <td><span class="status-badge status-${acc.roe_status}">${formatStatus(acc.roe_status)}</span></td>
                         <td class="days-remaining ${daysClass}">${daysText}</td>
                         <td class="note-cell">
-                            <input type="text" 
-                                   class="note-input ${noteClass}" 
-                                   placeholder="Add note..." 
-                                   value="${escapeHtml(noteValue)}"
-                                   onchange="handleNoteChange('${acc.salesforce_id}', this)"
-                                   onblur="handleNoteChange('${acc.salesforce_id}', this)">
+                            <div class="note-preview ${noteClass}" onclick="openNoteModal('${acc.salesforce_id}', '${escapeHtml(acc.name)}')">
+                                ${noteValue ? escapeHtml(noteValue) : '<span class="note-preview-empty">+ Add note</span>'}
+                            </div>
                         </td>
                     </tr>
                 `;
