@@ -261,7 +261,7 @@
         let allAccounts = [];
         let currentFilter = 'all';
         let currentFilterType = 'all';
-        let sortColumn = 'days';
+        let sortColumn = 'priority';
         let sortDirection = 'asc';
         let sharedHotAccounts = {}; // From API
         
@@ -590,6 +590,9 @@
                 renderTable(filterAndSortAccounts());
             });
         });
+        
+        // Set initial sort indicator
+        document.querySelector('th[data-sort="priority"]').classList.add('sorted-asc');
         
         // Load data
         loadData();
