@@ -419,10 +419,20 @@
         // Event listeners
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentFilter = btn.dataset.filter;
-                currentFilterType = btn.dataset.type;
+                const clickedFilter = btn.dataset.filter;
+                
+                // If clicking the same filter (not "all"), toggle back to "all"
+                if (currentFilter === clickedFilter && clickedFilter !== 'all') {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelector('[data-filter="all"]').classList.add('active');
+                    currentFilter = 'all';
+                    currentFilterType = 'all';
+                } else {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentFilter = clickedFilter;
+                    currentFilterType = btn.dataset.type;
+                }
                 renderTable(filterAndSortAccounts());
             });
         });
