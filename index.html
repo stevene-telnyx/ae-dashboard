@@ -318,29 +318,52 @@
             }
         }
         
-        // Notes - localStorage persistence
-        function getNotes() {
-            const stored = localStorage.getItem('accountNotes');
-            return stored ? JSON.parse(stored) : {};
-        }
+        // Notes - synced via Cloudflare Worker
+        let sharedNotes = {};
         
-        function setNote(accountId, note) {
-            const notes = getNotes();
-            if (note && note.trim()) {
-                notes[accountId] = note.trim();
-            } else {
-                delete notes[accountId];
-            }
-            localStorage.setItem('accountNotes', JSON.stringify(notes));
+        function getNotes() {
+            return sharedNotes;
         }
         
         function getNote(accountId) {
-            return getNotes()[accountId] || '';
+            return sharedNotes[accountId] || '';
         }
         
+        async function loadSharedNotes() {
+            try {
+                const resp = await fetch(`${SYNC_API}/notes`);
+                sharedNotes = await resp.json();
+            } catch (e) {
+                console.log('Failed to load notes from API');
+                sharedNotes = {};
+            }
+        }
+        
+        let noteSyncTimeout = null;
         function handleNoteChange(accountId, inputEl) {
-            setNote(accountId, inputEl.value);
-            inputEl.classList.toggle('has-note', !!inputEl.value.trim());
+            const note = inputEl.value.trim();
+            
+            // Update locally
+            if (note) {
+                sharedNotes[accountId] = note;
+            } else {
+                delete sharedNotes[accountId];
+            }
+            inputEl.classList.toggle('has-note', !!note);
+            
+            // Debounce sync (wait 500ms after typing stops)
+            clearTimeout(noteSyncTimeout);
+            noteSyncTimeout = setTimeout(async () => {
+                try {
+                    await fetch(`${SYNC_API}/notes`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(sharedNotes),
+                    });
+                } catch (e) {
+                    console.error('Failed to sync notes:', e);
+                }
+            }, 500);
         }
         
         function exportData() {
@@ -367,8 +390,8 @@
         
         async function loadData() {
             try {
-                // Load shared hot accounts first
-                await loadSharedHotAccounts();
+                // Load shared data first
+                await Promise.all([loadSharedHotAccounts(), loadSharedNotes()]);
                 
                 const resp = await fetch('accounts.json');
                 const data = await resp.json();
