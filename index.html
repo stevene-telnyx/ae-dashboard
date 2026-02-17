@@ -240,7 +240,6 @@
         <button class="filter-btn" data-filter="expiring_soon" data-type="roe">ROE Expiring</button>
         <input type="text" class="search" placeholder="Search accounts..." id="searchInput">
         <button class="export-btn" onclick="exportData()">📤 Export</button>
-        <button class="export-btn" onclick="publishHotAccounts()" style="background:#f97316;">🔥 Publish Hot</button>
     </div>
     
     <table>
@@ -264,92 +263,59 @@
         let currentFilterType = 'all';
         let sortColumn = 'days';
         let sortDirection = 'asc';
-        let sharedHotAccounts = {}; // From repo
+        let sharedHotAccounts = {}; // From API
         
-        // Hot accounts - combines shared (repo) + local (localStorage)
-        function getLocalHotAccounts() {
-            const stored = localStorage.getItem('hotAccounts');
-            return stored ? JSON.parse(stored) : {};
-        }
+        const SYNC_API = 'https://ae-dashboard-sync.steven-econs.workers.dev';
         
+        // Hot accounts - synced via Cloudflare Worker
         function getHotAccounts() {
-            // Merge shared + local (local overrides)
-            return { ...sharedHotAccounts, ...getLocalHotAccounts() };
-        }
-        
-        function setLocalHotAccounts(hot) {
-            localStorage.setItem('hotAccounts', JSON.stringify(hot));
-            updateHotCount();
-        }
-        
-        function toggleHot(accountId) {
-            const local = getLocalHotAccounts();
-            const combined = getHotAccounts();
-            
-            if (combined[accountId]) {
-                // Remove: if it's shared, mark as removed locally; if local, just delete
-                local[accountId] = false; // false = explicitly removed
-            } else {
-                local[accountId] = Date.now();
-            }
-            setLocalHotAccounts(local);
-            renderTable(filterAndSortAccounts());
+            return sharedHotAccounts;
         }
         
         function isHot(accountId) {
-            const local = getLocalHotAccounts();
-            // If explicitly set to false locally, it's not hot
-            if (local[accountId] === false) return false;
-            // Otherwise check combined
-            return !!getHotAccounts()[accountId];
+            return !!sharedHotAccounts[accountId];
         }
         
         function updateHotCount() {
-            const combined = getHotAccounts();
-            const local = getLocalHotAccounts();
-            // Count accounts that are hot (not explicitly removed)
-            const count = Object.keys(combined).filter(id => {
-                if (local[id] === false) return false;
-                return combined[id];
-            }).length;
+            const count = Object.keys(sharedHotAccounts).filter(id => sharedHotAccounts[id]).length;
             document.getElementById('hotCount').textContent = count;
         }
         
         async function loadSharedHotAccounts() {
             try {
-                const resp = await fetch('hot-accounts.json');
+                const resp = await fetch(`${SYNC_API}/hot`);
                 sharedHotAccounts = await resp.json();
             } catch (e) {
-                console.log('No shared hot accounts file');
-                sharedHotAccounts = {};
+                console.log('Failed to load hot accounts from API, trying local file');
+                try {
+                    const resp = await fetch('hot-accounts.json');
+                    sharedHotAccounts = await resp.json();
+                } catch (e2) {
+                    sharedHotAccounts = {};
+                }
             }
         }
         
-        function publishHotAccounts() {
-            // Get all currently hot accounts (for publishing to shared)
-            const local = getLocalHotAccounts();
-            const publish = {};
+        async function toggleHot(accountId) {
+            // Toggle locally first for instant feedback
+            if (sharedHotAccounts[accountId]) {
+                delete sharedHotAccounts[accountId];
+            } else {
+                sharedHotAccounts[accountId] = Date.now();
+            }
+            updateHotCount();
+            renderTable(filterAndSortAccounts());
             
-            // Start with shared
-            Object.keys(sharedHotAccounts).forEach(id => {
-                if (local[id] !== false) {
-                    publish[id] = sharedHotAccounts[id];
-                }
-            });
-            
-            // Add local additions
-            Object.keys(local).forEach(id => {
-                if (local[id] && local[id] !== false) {
-                    publish[id] = local[id];
-                }
-            });
-            
-            const text = JSON.stringify(publish, null, 2);
-            navigator.clipboard.writeText(text).then(() => {
-                alert(`Copied ${Object.keys(publish).length} hot accounts!\n\nSend this to Dwight to update the shared list.`);
-            }).catch(() => {
-                prompt('Copy this and send to Dwight:', text);
-            });
+            // Sync to server
+            try {
+                await fetch(`${SYNC_API}/hot`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sharedHotAccounts),
+                });
+            } catch (e) {
+                console.error('Failed to sync hot accounts:', e);
+            }
         }
         
         // Notes - localStorage persistence
