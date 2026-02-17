@@ -368,8 +368,7 @@
 
     <script>
         let allAccounts = [];
-        let currentFilter = 'all';
-        let currentFilterType = 'all';
+        let activeFilters = {}; // { hot: true, bdr: 'Quinn Marcy', priority: 'P1' }
         let sortColumn = 'priority';
         let sortDirection = 'asc';
         let sharedHotAccounts = {}; // From API
@@ -577,21 +576,24 @@
             const bdrNotes = getBdrNotes();
             let filtered = allAccounts;
             
-            // Apply filter
-            if (currentFilter !== 'all') {
-                if (currentFilterType === 'hot') {
-                    filtered = filtered.filter(a => isHot(a.salesforce_id));
-                } else if (currentFilterType === 'has_notes') {
-                    filtered = filtered.filter(a => steveNotes[a.salesforce_id] || bdrNotes[a.salesforce_id]);
-                } else if (currentFilterType === 'open_opp') {
-                    filtered = filtered.filter(a => a.has_open_opp);
-                } else if (currentFilterType === 'priority') {
-                    filtered = filtered.filter(a => a.priority === currentFilter);
-                } else if (currentFilterType === 'roe') {
-                    filtered = filtered.filter(a => a.roe_status === currentFilter);
-                } else if (currentFilterType === 'bdr') {
-                    filtered = filtered.filter(a => a.bdr_name === currentFilter);
-                }
+            // Apply all active filters (AND logic)
+            if (activeFilters.hot) {
+                filtered = filtered.filter(a => isHot(a.salesforce_id));
+            }
+            if (activeFilters.has_notes) {
+                filtered = filtered.filter(a => steveNotes[a.salesforce_id] || bdrNotes[a.salesforce_id]);
+            }
+            if (activeFilters.open_opp) {
+                filtered = filtered.filter(a => a.has_open_opp);
+            }
+            if (activeFilters.priority) {
+                filtered = filtered.filter(a => a.priority === activeFilters.priority);
+            }
+            if (activeFilters.roe) {
+                filtered = filtered.filter(a => a.roe_status === activeFilters.roe);
+            }
+            if (activeFilters.bdr) {
+                filtered = filtered.filter(a => a.bdr_name === activeFilters.bdr);
             }
             
             // Apply search
@@ -729,22 +731,46 @@
             return labels[status] || status;
         }
         
-        // Event listeners
+        // Event listeners - multi-filter support
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const clickedFilter = btn.dataset.filter;
+                const filterType = btn.dataset.type;
+                const filterValue = btn.dataset.filter;
                 
-                // If clicking the same filter (not "all"), toggle back to "all"
-                if (currentFilter === clickedFilter && clickedFilter !== 'all') {
-                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelector('[data-filter="all"]').classList.add('active');
-                    currentFilter = 'all';
-                    currentFilterType = 'all';
-                } else {
+                // "All" clears all filters
+                if (filterValue === 'all') {
+                    activeFilters = {};
                     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
-                    currentFilter = clickedFilter;
-                    currentFilterType = btn.dataset.type;
+                } else {
+                    // Remove "All" active state when selecting other filters
+                    document.querySelector('[data-filter="all"]').classList.remove('active');
+                    
+                    // Toggle this filter
+                    if (btn.classList.contains('active')) {
+                        // Turn off this filter
+                        btn.classList.remove('active');
+                        delete activeFilters[filterType];
+                        
+                        // If no filters active, show "All" as active
+                        if (Object.keys(activeFilters).length === 0) {
+                            document.querySelector('[data-filter="all"]').classList.add('active');
+                        }
+                    } else {
+                        // Turn on this filter (and turn off others in same group)
+                        // For priority and bdr, only one can be active
+                        if (filterType === 'priority' || filterType === 'bdr' || filterType === 'roe') {
+                            document.querySelectorAll(`[data-type="${filterType}"]`).forEach(b => b.classList.remove('active'));
+                        }
+                        btn.classList.add('active');
+                        
+                        // Boolean filters
+                        if (filterType === 'hot' || filterType === 'has_notes' || filterType === 'open_opp') {
+                            activeFilters[filterType] = true;
+                        } else {
+                            activeFilters[filterType] = filterValue;
+                        }
+                    }
                 }
                 renderTable(filterAndSortAccounts());
             });
