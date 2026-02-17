@@ -240,6 +240,7 @@
         <button class="filter-btn" data-filter="expiring_soon" data-type="roe">ROE Expiring</button>
         <input type="text" class="search" placeholder="Search accounts..." id="searchInput">
         <button class="export-btn" onclick="exportData()">📤 Export</button>
+        <button class="export-btn" onclick="publishHotAccounts()" style="background:#f97316;">🔥 Publish Hot</button>
     </div>
     
     <table>
@@ -263,32 +264,92 @@
         let currentFilterType = 'all';
         let sortColumn = 'days';
         let sortDirection = 'asc';
+        let sharedHotAccounts = {}; // From repo
         
-        // Hot accounts - localStorage persistence
-        function getHotAccounts() {
+        // Hot accounts - combines shared (repo) + local (localStorage)
+        function getLocalHotAccounts() {
             const stored = localStorage.getItem('hotAccounts');
             return stored ? JSON.parse(stored) : {};
         }
         
-        function setHotAccounts(hot) {
+        function getHotAccounts() {
+            // Merge shared + local (local overrides)
+            return { ...sharedHotAccounts, ...getLocalHotAccounts() };
+        }
+        
+        function setLocalHotAccounts(hot) {
             localStorage.setItem('hotAccounts', JSON.stringify(hot));
             updateHotCount();
         }
         
         function toggleHot(accountId) {
-            const hot = getHotAccounts();
-            if (hot[accountId]) {
-                delete hot[accountId];
+            const local = getLocalHotAccounts();
+            const combined = getHotAccounts();
+            
+            if (combined[accountId]) {
+                // Remove: if it's shared, mark as removed locally; if local, just delete
+                local[accountId] = false; // false = explicitly removed
             } else {
-                hot[accountId] = Date.now();
+                local[accountId] = Date.now();
             }
-            setHotAccounts(hot);
+            setLocalHotAccounts(local);
             renderTable(filterAndSortAccounts());
         }
         
+        function isHot(accountId) {
+            const local = getLocalHotAccounts();
+            // If explicitly set to false locally, it's not hot
+            if (local[accountId] === false) return false;
+            // Otherwise check combined
+            return !!getHotAccounts()[accountId];
+        }
+        
         function updateHotCount() {
-            const count = Object.keys(getHotAccounts()).length;
+            const combined = getHotAccounts();
+            const local = getLocalHotAccounts();
+            // Count accounts that are hot (not explicitly removed)
+            const count = Object.keys(combined).filter(id => {
+                if (local[id] === false) return false;
+                return combined[id];
+            }).length;
             document.getElementById('hotCount').textContent = count;
+        }
+        
+        async function loadSharedHotAccounts() {
+            try {
+                const resp = await fetch('hot-accounts.json');
+                sharedHotAccounts = await resp.json();
+            } catch (e) {
+                console.log('No shared hot accounts file');
+                sharedHotAccounts = {};
+            }
+        }
+        
+        function publishHotAccounts() {
+            // Get all currently hot accounts (for publishing to shared)
+            const local = getLocalHotAccounts();
+            const publish = {};
+            
+            // Start with shared
+            Object.keys(sharedHotAccounts).forEach(id => {
+                if (local[id] !== false) {
+                    publish[id] = sharedHotAccounts[id];
+                }
+            });
+            
+            // Add local additions
+            Object.keys(local).forEach(id => {
+                if (local[id] && local[id] !== false) {
+                    publish[id] = local[id];
+                }
+            });
+            
+            const text = JSON.stringify(publish, null, 2);
+            navigator.clipboard.writeText(text).then(() => {
+                alert(`Copied ${Object.keys(publish).length} hot accounts!\n\nSend this to Dwight to update the shared list.`);
+            }).catch(() => {
+                prompt('Copy this and send to Dwight:', text);
+            });
         }
         
         // Notes - localStorage persistence
@@ -340,6 +401,9 @@
         
         async function loadData() {
             try {
+                // Load shared hot accounts first
+                await loadSharedHotAccounts();
+                
                 const resp = await fetch('accounts.json');
                 const data = await resp.json();
                 
@@ -360,14 +424,13 @@
         
         function filterAndSortAccounts() {
             const search = document.getElementById('searchInput').value.toLowerCase();
-            const hotAccounts = getHotAccounts();
             const notes = getNotes();
             let filtered = allAccounts;
             
             // Apply filter
             if (currentFilter !== 'all') {
                 if (currentFilterType === 'hot') {
-                    filtered = filtered.filter(a => hotAccounts[a.salesforce_id]);
+                    filtered = filtered.filter(a => isHot(a.salesforce_id));
                 } else if (currentFilterType === 'has_notes') {
                     filtered = filtered.filter(a => notes[a.salesforce_id]);
                 } else if (currentFilterType === 'open_opp') {
@@ -394,8 +457,8 @@
                 let aVal, bVal;
                 switch(sortColumn) {
                     case 'hot':
-                        aVal = hotAccounts[a.salesforce_id] ? 1 : 0;
-                        bVal = hotAccounts[b.salesforce_id] ? 1 : 0;
+                        aVal = isHot(a.salesforce_id) ? 1 : 0;
+                        bVal = isHot(b.salesforce_id) ? 1 : 0;
                         break;
                     case 'opp':
                         aVal = a.has_open_opp ? 1 : 0;
@@ -443,7 +506,6 @@
                 return;
             }
             
-            const hotAccounts = getHotAccounts();
             const notes = getNotes();
             
             tbody.innerHTML = accounts.map(acc => {
@@ -454,8 +516,8 @@
                                  `${acc.days_remaining}d`;
                 
                 const priorityClass = acc.priority ? `priority-${acc.priority}` : 'priority-none';
-                const isHot = hotAccounts[acc.salesforce_id];
-                const hotClass = isHot ? 'is-hot' : '';
+                const accountIsHot = isHot(acc.salesforce_id);
+                const hotClass = accountIsHot ? 'is-hot' : '';
                 const oppIndicator = acc.has_open_opp ? '💰' : '<span class="opp-none">💰</span>';
                 const noteValue = notes[acc.salesforce_id] || '';
                 const noteClass = noteValue ? 'has-note' : '';
