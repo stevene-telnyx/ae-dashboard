@@ -66,6 +66,7 @@
         .filter-btn.hot-filter.active { background: #f97316; border-color: #f97316; }
         .filter-btn.opp-filter.active { background: #eab308; border-color: #eab308; color: #000; }
         .filter-btn.notes-filter.active { background: #a855f7; border-color: #a855f7; }
+        .filter-btn.bdr-filter.active { background: #06b6d4; border-color: #06b6d4; }
         
         .search {
             background: #16181c;
@@ -330,6 +331,9 @@
         <span style="color:#2f3336; margin: 0 8px;">|</span>
         <button class="filter-btn" data-filter="expired" data-type="roe">ROE Expired</button>
         <button class="filter-btn" data-filter="expiring_soon" data-type="roe">ROE Expiring</button>
+        <span style="color:#2f3336; margin: 0 8px;">|</span>
+        <button class="filter-btn bdr-filter" data-filter="Timothy Allison" data-type="bdr">Timothy A</button>
+        <button class="filter-btn bdr-filter" data-filter="Quinn Marcy" data-type="bdr">Quinn M</button>
         <input type="text" class="search" placeholder="Search accounts..." id="searchInput">
         <button class="export-btn" onclick="exportData()">📤 Export</button>
     </div>
@@ -343,6 +347,7 @@
                 <th data-sort="name">Account</th>
                 <th data-sort="status">ROE Status</th>
                 <th data-sort="days">Days</th>
+                <th data-sort="bdr">BDR</th>
                 <th data-sort="notes">Notes</th>
             </tr>
         </thead>
@@ -561,6 +566,8 @@
                     filtered = filtered.filter(a => a.priority === currentFilter);
                 } else if (currentFilterType === 'roe') {
                     filtered = filtered.filter(a => a.roe_status === currentFilter);
+                } else if (currentFilterType === 'bdr') {
+                    filtered = filtered.filter(a => a.bdr_name === currentFilter);
                 }
             }
             
@@ -608,6 +615,10 @@
                         aVal = notes[a.salesforce_id] ? 0 : 1;
                         bVal = notes[b.salesforce_id] ? 0 : 1;
                         break;
+                    case 'bdr':
+                        aVal = (a.bdr_name || 'zzz').toLowerCase();
+                        bVal = (b.bdr_name || 'zzz').toLowerCase();
+                        break;
                     default:
                         aVal = 0; bVal = 0;
                 }
@@ -624,7 +635,7 @@
             const tbody = document.getElementById('accountsTable');
             
             if (accounts.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No accounts match your filters</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No accounts match your filters</td></tr>';
                 return;
             }
             
@@ -655,6 +666,7 @@
                         </td>
                         <td><span class="status-badge status-${acc.roe_status}">${formatStatus(acc.roe_status)}</span></td>
                         <td class="days-remaining ${daysClass}">${daysText}</td>
+                        <td style="color:#71767b;font-size:13px">${acc.bdr_name || '-'}</td>
                         <td class="note-cell">
                             <div class="note-preview ${noteClass}" onclick="openNoteModal('${acc.salesforce_id}', '${escapeHtml(acc.name)}')">
                                 ${noteValue ? escapeHtml(noteValue) : '<span class="note-preview-empty">+ Add note</span>'}
