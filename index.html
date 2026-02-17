@@ -348,7 +348,8 @@
                 <th data-sort="status">ROE Status</th>
                 <th data-sort="days">Days</th>
                 <th data-sort="bdr">BDR</th>
-                <th data-sort="notes">Notes</th>
+                <th data-sort="steve-notes">Steve Notes</th>
+                <th data-sort="bdr-notes">BDR Notes</th>
             </tr>
         </thead>
         <tbody id="accountsTable"></tbody>
@@ -427,33 +428,50 @@
         }
         
         // Notes - synced via Cloudflare Worker
-        let sharedNotes = {};
+        let sharedSteveNotes = {};
+        let sharedBdrNotes = {};
         
-        function getNotes() {
-            return sharedNotes;
+        function getSteveNotes() {
+            return sharedSteveNotes;
         }
         
-        function getNote(accountId) {
-            return sharedNotes[accountId] || '';
+        function getBdrNotes() {
+            return sharedBdrNotes;
+        }
+        
+        function getSteveNote(accountId) {
+            return sharedSteveNotes[accountId] || '';
+        }
+        
+        function getBdrNote(accountId) {
+            return sharedBdrNotes[accountId] || '';
         }
         
         async function loadSharedNotes() {
             try {
-                const resp = await fetch(`${SYNC_API}/notes`);
-                sharedNotes = await resp.json();
+                const [steveResp, bdrResp] = await Promise.all([
+                    fetch(`${SYNC_API}/notes`),
+                    fetch(`${SYNC_API}/bdr-notes`)
+                ]);
+                sharedSteveNotes = await steveResp.json();
+                sharedBdrNotes = await bdrResp.json();
             } catch (e) {
                 console.log('Failed to load notes from API');
-                sharedNotes = {};
+                sharedSteveNotes = {};
+                sharedBdrNotes = {};
             }
         }
         
         let noteSyncTimeout = null;
         let currentNoteAccountId = null;
+        let currentNoteType = null; // 'steve' or 'bdr'
         
-        function openNoteModal(accountId, accountName) {
+        function openNoteModal(accountId, accountName, noteType) {
             currentNoteAccountId = accountId;
-            document.getElementById('noteModalTitle').textContent = accountName;
-            document.getElementById('noteModalTextarea').value = getNote(accountId);
+            currentNoteType = noteType;
+            const label = noteType === 'steve' ? 'Steve Notes' : 'BDR Notes';
+            document.getElementById('noteModalTitle').textContent = `${accountName} - ${label}`;
+            document.getElementById('noteModalTextarea').value = noteType === 'steve' ? getSteveNote(accountId) : getBdrNote(accountId);
             document.getElementById('noteModal').classList.add('active');
             document.getElementById('noteModalTextarea').focus();
         }
@@ -462,24 +480,28 @@
             if (event && event.target !== event.currentTarget) return;
             document.getElementById('noteModal').classList.remove('active');
             currentNoteAccountId = null;
+            currentNoteType = null;
         }
         
-        function handleNoteChange(accountId, note) {
+        function handleNoteChange(accountId, note, noteType) {
+            const notes = noteType === 'steve' ? sharedSteveNotes : sharedBdrNotes;
+            const endpoint = noteType === 'steve' ? '/notes' : '/bdr-notes';
+            
             // Update locally
             if (note && note.trim()) {
-                sharedNotes[accountId] = note.trim();
+                notes[accountId] = note.trim();
             } else {
-                delete sharedNotes[accountId];
+                delete notes[accountId];
             }
             
             // Debounce sync (wait 500ms after typing stops)
             clearTimeout(noteSyncTimeout);
             noteSyncTimeout = setTimeout(async () => {
                 try {
-                    await fetch(`${SYNC_API}/notes`, {
+                    await fetch(`${SYNC_API}${endpoint}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(sharedNotes),
+                        body: JSON.stringify(notes),
                     });
                     // Re-render to update the preview
                     renderTable(filterAndSortAccounts());
@@ -493,8 +515,8 @@
         document.addEventListener('DOMContentLoaded', () => {
             const textarea = document.getElementById('noteModalTextarea');
             textarea.addEventListener('input', () => {
-                if (currentNoteAccountId) {
-                    handleNoteChange(currentNoteAccountId, textarea.value);
+                if (currentNoteAccountId && currentNoteType) {
+                    handleNoteChange(currentNoteAccountId, textarea.value, currentNoteType);
                 }
             });
         });
@@ -551,7 +573,8 @@
         
         function filterAndSortAccounts() {
             const search = document.getElementById('searchInput').value.toLowerCase();
-            const notes = getNotes();
+            const steveNotes = getSteveNotes();
+            const bdrNotes = getBdrNotes();
             let filtered = allAccounts;
             
             // Apply filter
@@ -559,7 +582,7 @@
                 if (currentFilterType === 'hot') {
                     filtered = filtered.filter(a => isHot(a.salesforce_id));
                 } else if (currentFilterType === 'has_notes') {
-                    filtered = filtered.filter(a => notes[a.salesforce_id]);
+                    filtered = filtered.filter(a => steveNotes[a.salesforce_id] || bdrNotes[a.salesforce_id]);
                 } else if (currentFilterType === 'open_opp') {
                     filtered = filtered.filter(a => a.has_open_opp);
                 } else if (currentFilterType === 'priority') {
@@ -577,7 +600,8 @@
                     a.name.toLowerCase().includes(search) ||
                     (a.industry && a.industry.toLowerCase().includes(search)) ||
                     (a.city && a.city.toLowerCase().includes(search)) ||
-                    (notes[a.salesforce_id] && notes[a.salesforce_id].toLowerCase().includes(search))
+                    (steveNotes[a.salesforce_id] && steveNotes[a.salesforce_id].toLowerCase().includes(search)) ||
+                    (bdrNotes[a.salesforce_id] && bdrNotes[a.salesforce_id].toLowerCase().includes(search))
                 );
             }
             
@@ -611,9 +635,13 @@
                         aVal = a.days_remaining === -999 ? 9999 : a.days_remaining;
                         bVal = b.days_remaining === -999 ? 9999 : b.days_remaining;
                         break;
-                    case 'notes':
-                        aVal = notes[a.salesforce_id] ? 0 : 1;
-                        bVal = notes[b.salesforce_id] ? 0 : 1;
+                    case 'steve-notes':
+                        aVal = steveNotes[a.salesforce_id] ? 0 : 1;
+                        bVal = steveNotes[b.salesforce_id] ? 0 : 1;
+                        break;
+                    case 'bdr-notes':
+                        aVal = bdrNotes[a.salesforce_id] ? 0 : 1;
+                        bVal = bdrNotes[b.salesforce_id] ? 0 : 1;
                         break;
                     case 'bdr':
                         aVal = (a.bdr_name || 'zzz').toLowerCase();
@@ -635,11 +663,12 @@
             const tbody = document.getElementById('accountsTable');
             
             if (accounts.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No accounts match your filters</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No accounts match your filters</td></tr>';
                 return;
             }
             
-            const notes = getNotes();
+            const steveNotes = getSteveNotes();
+            const bdrNotes = getBdrNotes();
             
             tbody.innerHTML = accounts.map(acc => {
                 const daysClass = acc.days_remaining < 0 ? 'days-negative' : 
@@ -652,8 +681,10 @@
                 const accountIsHot = isHot(acc.salesforce_id);
                 const hotClass = accountIsHot ? 'is-hot' : '';
                 const oppIndicator = acc.has_open_opp ? '💰' : '<span class="opp-none">💰</span>';
-                const noteValue = notes[acc.salesforce_id] || '';
-                const noteClass = noteValue ? 'has-note' : '';
+                const steveNoteValue = steveNotes[acc.salesforce_id] || '';
+                const steveNoteClass = steveNoteValue ? 'has-note' : '';
+                const bdrNoteValue = bdrNotes[acc.salesforce_id] || '';
+                const bdrNoteClass = bdrNoteValue ? 'has-note' : '';
                 
                 return `
                     <tr>
@@ -668,8 +699,13 @@
                         <td class="days-remaining ${daysClass}">${daysText}</td>
                         <td style="color:#71767b;font-size:13px">${acc.bdr_name || '-'}</td>
                         <td class="note-cell">
-                            <div class="note-preview ${noteClass}" onclick="openNoteModal('${acc.salesforce_id}', '${escapeHtml(acc.name)}')">
-                                ${noteValue ? escapeHtml(noteValue) : '<span class="note-preview-empty">+ Add note</span>'}
+                            <div class="note-preview ${steveNoteClass}" onclick="openNoteModal('${acc.salesforce_id}', '${escapeHtml(acc.name)}', 'steve')">
+                                ${steveNoteValue ? escapeHtml(steveNoteValue) : '<span class="note-preview-empty">+ Add</span>'}
+                            </div>
+                        </td>
+                        <td class="note-cell">
+                            <div class="note-preview ${bdrNoteClass}" onclick="openNoteModal('${acc.salesforce_id}', '${escapeHtml(acc.name)}', 'bdr')">
+                                ${bdrNoteValue ? escapeHtml(bdrNoteValue) : '<span class="note-preview-empty">+ Add</span>'}
                             </div>
                         </td>
                     </tr>
